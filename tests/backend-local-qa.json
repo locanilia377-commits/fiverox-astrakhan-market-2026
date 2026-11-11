@@ -11,6 +11,9 @@
     "Literal formula-like text, blank vs zero, cents and invalid values",
     "Operation ID binds author, record and payload; matching replay returns saved result",
     "Card write, audit and idempotency record use one atomic batch; failure propagates",
-    "Public RPC cannot invoke setup"
+    "Public RPC cannot invoke setup",
+    "Expired code, expired session and changed token are rejected",
+    "Gmail dot aliases share limits and keep the authoritative owner address; other domains preserve dots",
+    "Exhausting verification attempts invalidates the correct code"
   ]
 }
