@@ -1,6 +1,6 @@
 const CRM = Object.freeze({
   sheetId: 'YOUR_PRIVATE_CRM_SPREADSHEET_ID',
-  release: 'astrakhan-cabinet-2026-11-11-r1',
+  release: 'astrakhan-cabinet-2026-11-12-r2',
   stages: ['Не обработан', 'Контакт установлен', 'Потребность выявлена', 'КП отправлено', 'Переговоры', 'Клиент', 'Отложено', 'Отказ'],
   priorities: ['Не задан', 'Высокий', 'Средний', 'Низкий'],
   actions: ['Звонок', 'WhatsApp', 'Telegram', 'Email', 'Встреча', 'Другое'],
@@ -26,7 +26,18 @@ const CRM = Object.freeze({
 
 function checkAstrakhanPermissions() {
   const info = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL);
-  console.info(JSON.stringify({ status: String(info.getAuthorizationStatus()), scopes: info.getAuthorizedScopes() }));
+  const mail = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL, ['https://www.googleapis.com/auth/script.send_mail']);
+  const scopes = info.getAuthorizedScopes() || [];
+  const result = { status: String(info.getAuthorizationStatus()), scopes: scopes, mailStatus: String(mail.getAuthorizationStatus()) };
+  if (scopes.includes('https://www.googleapis.com/auth/spreadsheets') && scopes.includes('https://www.googleapis.com/auth/userinfo.email')) {
+    result.activeUser = Session.getActiveUser().getEmail(); result.effectiveUser = Session.getEffectiveUser().getEmail(); result.owner = crmRawBook_().getOwner().getEmail();
+  }
+  console.info(JSON.stringify(result));
+  if (result.owner && result.owner === result.activeUser && result.owner === result.effectiveUser) {
+    const recent = JSON.parse(PropertiesService.getScriptProperties().getProperty('CRM_AUTH_DIAGNOSTICS') || '[]').slice(-5);
+    console.info(JSON.stringify({ configured: Boolean(crmEmailConfigured_()), mailOutcomes: recent }));
+  }
+  if (mail.getAuthorizationStatus() === ScriptApp.AuthorizationStatus.REQUIRED) console.info('MAIL_PERMISSION_URL ' + mail.getAuthorizationUrl());
 }
 
 function authorizeAstrakhanMail() {
@@ -52,8 +63,8 @@ function setupAstrakhanCrm() {
     if (name === CRM.operationsTab && !sheet.isSheetHidden()) sheet.hideSheet();
   });
   const auth = crmEmailSetup_();
-  console.info('CRM Астрахани настроена. Вход по коду включён. Остаток почтовой квоты: ' + auth.remainingMailRecipients);
-  return { release: CRM.release, configured: auth.enabled };
+  console.info(auth.mailReady ? 'CRM Астрахани настроена. Отправка кодов доступна. Остаток почтовой квоты: ' + auth.remainingMailRecipients : 'CRM и журналы настроены. Отправка кодов пока недоступна: ' + auth.mailError);
+  return { release: CRM.release, configured: auth.enabled, mailReady: auth.mailReady, mailError: auth.mailError };
 }
 
 function crmRawBook_() { return SpreadsheetApp.openById(CRM.sheetId); }
@@ -349,18 +360,26 @@ function crmEmailRandom_() {
 }
 
 // Run in the Apps Script editor as the owner. This never sends a letter.
+function crmEmailQuota_() {
+  try { return { ready: true, remainingMailRecipients: MailApp.getRemainingDailyQuota(), error: '' }; }
+  catch (error) {
+    const message = String(error && error.message || error);
+    return { ready: false, remainingMailRecipients: null, error: /permission|authorization|scope|разрешен/i.test(message) ? 'mail_authorization_required' : 'mail_service_unavailable' };
+  }
+}
+
 function crmEmailSetup_() {
   const owner = crmEmailAddress_(crmRawBook_().getOwner());
   if (!owner || owner !== crmEmailAddress_(Session.getActiveUser()) || owner !== crmEmailAddress_(Session.getEffectiveUser())) {
     throw new Error('Настроить вход может только владелец CRM-таблицы в редакторе Apps Script.');
   }
-  const remainingMailRecipients = MailApp.getRemainingDailyQuota();
   crmEmailLock_(props => {
     const existing = props.getProperty(CRM_EMAIL_AUTH.secretKey);
     const secret = /^[a-f0-9]{64}$/.test(existing || '') ? existing : crmEmailRandom_();
     props.setProperties({ [CRM_EMAIL_AUTH.secretKey]: secret, [CRM_EMAIL_AUTH.enabledKey]: 'true' });
   });
-  return { enabled: true, remainingMailRecipients };
+  const mail = crmEmailQuota_();
+  return { enabled: true, mailReady: mail.ready, remainingMailRecipients: mail.remainingMailRecipients, mailError: mail.error };
 }
 
 function crmEmailHex_(bytes) {
@@ -473,7 +492,9 @@ function crmEmailStart(value, browserProof) {
     if (!crmEmailConfigured_()) return crmEmailOutcome_('not_configured');
     const access = crmEmailAccess_(email);
     if (!access) return crmEmailOutcome_('ineligible');
-    if (MailApp.getRemainingDailyQuota() < 1) return crmEmailOutcome_('quota_exhausted');
+    const mail = crmEmailQuota_();
+    if (!mail.ready) return crmEmailOutcome_(mail.error);
+    if (mail.remainingMailRecipients < 1) return crmEmailOutcome_('quota_exhausted');
     const mailbox = crmEmailMailbox_(access.email), key = crmEmailUserKey_(mailbox);
     const delivery = crmEmailLock_(props => crmEmailReserve_(props, key, access.email, mailbox, proof));
     if (!delivery) return crmEmailOutcome_('throttled');
@@ -485,13 +506,12 @@ function crmEmailStart(value, browserProof) {
         body: 'Код входа в кабинет Астрахани: ' + delivery.code + '\n\nКод действует 10 минут и используется один раз. Введите его только на странице FIVEROX CRM. Если вы не запрашивали код, просто проигнорируйте письмо.',
       });
     } catch (error) {
-      crmEmailOutcome_('transport_failure');
       crmEmailLock_(props => {
         const record = crmEmailRecord_(props, key, access.email);
         record.challenges = record.challenges.filter(item => item.id !== delivery.id);
         crmEmailSave_(props, key, record);
       });
-      return true;
+      return crmEmailOutcome_('transport_failure');
     }
     return crmEmailOutcome_('submitted');
   } catch (error) {
