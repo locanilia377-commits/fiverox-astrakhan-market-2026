@@ -23,6 +23,7 @@
    <div class="filters"><label>Поиск<input id="search" type="search" placeholder="Название, город или ID"></label><label>Этап<select id="stageFilter"><option value="">Все этапы</option></select></label><label>Ответственный<select id="managerFilter"><option value="">Все менеджеры</option></select></label><label>Следующее действие<select id="dueFilter"><option value="">Все даты</option><option value="late">Просрочено</option><option value="today">Сегодня</option><option value="planned">Запланировано</option><option value="none">Без срока</option></select></label><label>Профиль<select id="qualificationFilter"><option value="">Вся база</option><option value="Подтверждено">Подтверждённые</option><option value="Кандидат">Кандидаты</option></select></label></div>
   </section>
   <p id="workspaceStatus" class="status" role="status"></p>
+  <div id="recovery" class="actions" hidden><button id="recover" type="button">Проверить результат</button><button id="retry" type="button" hidden>Подтвердить сохранение</button></div>
   <div id="layout" class="layout"><section id="results" class="panel results" aria-label="Точки CRM"></section><section id="record" class="panel editor-panel" hidden aria-label="Карточка CRM">
    <div class="toolbar"><h2 id="company" tabindex="-1"></h2><button id="reloadCard" type="button">Перечитать</button></div><p id="companyMeta" class="muted"></p><div id="contacts" class="contacts"></div><p id="cardFacts" class="muted"></p>
    <form id="editForm" class="edit-form">
@@ -31,7 +32,7 @@
     <div class="grid"><label>Контактное лицо<input name="contact" maxlength="254"></label><label>Должность<input name="position" maxlength="254"></label><label>План первой сделки, ₽<input name="amount" type="number" min="0" max="1000000000000" step="0.01"></label><label>План закрытия<input name="closeDate" type="date"></label><label>Дата первой покупки<input name="purchaseDate" type="date"></label><label>Сумма первой покупки, ₽<input name="purchaseAmount" type="number" min="0" max="1000000000000" step="0.01"></label></div>
     <label>Причина отказа<input name="reason" maxlength="500"></label><label>Комментарий менеджера<textarea name="note" rows="3" maxlength="3000"></textarea></label>
     <div class="actions"><button class="primary" type="submit">Сохранить карточку</button><button id="discard" type="button">Отменить правки</button></div>
-   </form><p id="cardStatus" class="status" role="status"></p><button id="retry" type="button" hidden>Повторить ту же операцию</button>
+   </form><p id="cardStatus" class="status" role="status"></p>
    <details id="historySection" open><summary>История общения</summary><form id="activityForm"><div class="grid"><label>Канал<select name="channel" required></select></label><label>Результат<select name="result" required></select></label></div><label>Суть разговора<textarea name="note" rows="2" maxlength="3000"></textarea></label><button type="submit">Записать касание</button></form><div id="history"></div></details>
    <details><summary>Изменения этой карточки</summary><div id="cardAudit"></div></details>
   </section></div>

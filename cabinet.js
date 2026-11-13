@@ -56,17 +56,27 @@
     $('workspace').hidden = true; $('login').hidden = false; $('record').hidden = true;
     $('results').replaceChildren(); $('history').replaceChildren(); $('cardAudit').replaceChildren(); $('auditEntries').replaceChildren();
     $('metrics').replaceChildren(); $('contacts').replaceChildren(); $('diagnosticEntries').replaceChildren();
+    for(const id of ['company','companyMeta','cardFacts','identity','count']) $(id).textContent='';
+    $('search').value='';
+    fillSelect($('managerFilter'),[],'Все менеджеры');
+    for(const id of ['stageFilter','dueFilter','qualificationFilter']) $(id).value='';
+    $('admin').hidden=true; $('crmSheet').hidden=true; $('crmSheet').removeAttribute('href');
     edit.reset(); activity.reset(); $('verifyCode').hidden = true; $('requestCode').hidden = false;
-    $('verifyCode').reset(); $('retry').hidden = true;
+    $('verifyCode').reset(); $('retry').hidden = true; $('recovery').hidden = true;
+    message('workspaceStatus'); message('cardStatus');
     message('loginStatus',text,Boolean(text));
+    setBusy(false);
   }
   function setBusy(value) {
     busy = value;
-    for (const control of [...edit.elements,...activity.elements]) control.disabled = value || !canEdit();
-    for (const id of ['refresh','reloadCard','discard','retry']) $(id).disabled = value;
+    for (const control of [...edit.elements,...activity.elements]) control.disabled = value || !canEdit() || Boolean(pending);
+    for (const id of ['refresh','reloadCard','discard','listMode','boardMode','queueMode','auditMode']) $(id).disabled = value || Boolean(pending);
+    for (const id of ['recover','retry']) $(id).disabled = value;
   }
   function fillSelect(select, values, first) {
+    const selected = select.value;
     select.replaceChildren(...(first ? [new Option(first,'')] : []),...values.map(value => new Option(value,value)));
+    if (values.includes(selected) || first && selected === '') select.value = selected;
   }
   function dueKind(lead) {
     if (['Клиент','Отказ'].includes(lead.stage)) return 'closed';
@@ -148,11 +158,14 @@
   }
   async function loadCard(id, force=false) {
     if(busy)return;
-    if((dirty()||pending)&&!force){message('cardStatus','Сохраните правки или нажмите «Отменить правки», прежде чем открывать другую карточку.',true);return;}
+    if(pending){message('workspaceStatus','Сначала проверьте результат незавершённого сохранения.',true);return;}
+    if(dirty()&&!force){message('cardStatus','Сохраните правки или нажмите «Отменить правки», прежде чем открывать другую карточку.',true);return;}
     const request=++cardRequest,generation=epoch;
+    setBusy(true);
     message('workspaceStatus','Открываю карточку…');
     try{const card=await rpc('crmRead',id);if(request!==cardRequest||generation!==epoch)return;pending=null;$('retry').hidden=true;activity.reset();renderCard(card);message('cardStatus');message('workspaceStatus');}
     catch(error){if(generation===epoch)message('workspaceStatus',error.message,true);}
+    finally{if(generation===epoch&&request===cardRequest)setBusy(false);}
   }
   async function refreshList() {
     const generation=epoch;
@@ -167,23 +180,49 @@
   async function mutate(operation) {
     if(busy||!canEdit())return;
     const generation=epoch;
-    pending=operation;setBusy(true);$('retry').hidden=true;message('cardStatus','Сохраняю…');
+    pending=operation;setBusy(true);$('retry').hidden=true;$('recovery').hidden=true;message('workspaceStatus','Сохраняю…');message('cardStatus','Сохраняю…');
     try{
       await rpc(operation.method,...operation.args);
       if(generation!==epoch)return;
       const id=operation.args[0];
       const card=await rpc('crmRead',id);
       if(generation!==epoch)return;
-      pending=null;activity.reset();renderCard(card);message('cardStatus','Сохранено в CRM и журнале.');
+      pending=null;activity.reset();renderCard(card);message('workspaceStatus');message('cardStatus','Сохранено в CRM и журнале.');
     }catch(error){
       if(generation!==epoch)return;
-      if(error.network){$('retry').hidden=false;message('cardStatus','Не удалось подтвердить результат. Перечитайте карточку или повторите ту же операцию. Повторная запись контакта не создаст дубликат.',true);}
-      else{pending=null;message('cardStatus',error.message,true);}
+      if(error.network){
+        $('recovery').hidden=false;
+        const target=db.leads.find(row=>row.id===operation.args[0]);
+        message('workspaceStatus','Не удалось подтвердить сохранение'+(target?' «'+target.name+'»':'')+'. Проверьте результат, затем подтвердите сохранение.',true);
+        message('cardStatus','До подтверждения сохранения форма временно недоступна.',true);
+      }else{
+        pending=null;
+        let text=error.message;
+        if(operation.method==='crmMove'&&/CRM_CONFLICT/.test(error.message)){
+          try{const card=await rpc('crmRead',operation.args[0]);if(generation!==epoch)return;renderCard(card);text='Этап уже изменён. Показано актуальное состояние карточки.';}catch{}
+        }
+        message('workspaceStatus',text,true);message('cardStatus',text,true);
+      }
     }finally{if(generation===epoch)setBusy(false);}
+  }
+  async function recoverPending() {
+    if(busy||!pending)return;
+    const generation=epoch,operation=pending;
+    setBusy(true);message('workspaceStatus','Проверяю сохранённые данные…');
+    try{
+      const card=await rpc('crmRead',operation.args[0]);
+      if(generation!==epoch)return;
+      renderCard(card);
+      $('retry').hidden=false;
+      message('workspaceStatus','Сохранённые данные «'+card.name+'» загружены. Подтвердите сохранение: уже записанное касание не продублируется.');
+      message('cardStatus','Проверьте сохранённые значения и историю общения.');
+    }catch(error){if(generation===epoch)message('workspaceStatus',error.message,true);}
+    finally{if(generation===epoch)setBusy(false);}
   }
   edit.addEventListener('submit',event=>{event.preventDefault();if(!current||pending||busy)return;const patch={};for(const key of keys)if(edit.elements[key].value!==current.fields[key])patch[key]=edit.elements[key].value;if(!Object.keys(patch).length){message('cardStatus','Изменений нет.');return;}mutate({method:'crmSave',args:[current.id,current.version,patch,uuid()]});});
   activity.addEventListener('submit',event=>{event.preventDefault();if(!current||pending||busy)return;if(dirty()){message('cardStatus','Сначала сохраните правки карточки.',true);return;}mutate({method:'crmRecord',args:[current.id,{channel:activity.elements.channel.value,result:activity.elements.result.value,note:activity.elements.note.value},uuid()]});});
   $('retry').addEventListener('click',()=>{if(pending)mutate(pending);});
+  $('recover').addEventListener('click',recoverPending);
   $('reloadCard').addEventListener('click',()=>{if(!current)return;if(dirty()&&!pending){message('cardStatus','Нажмите «Отменить правки», чтобы загрузить сохранённую версию. Текст остаётся в форме.',true);return;}loadCard(current.id,true);});
   $('discard').addEventListener('click',()=>{if(!current||busy)return;loadCard(current.id,true);});
   $('results').addEventListener('click',event=>{const button=event.target.closest('button[data-id]');if(button)loadCard(button.dataset.id);});
@@ -201,7 +240,18 @@
     else renderResults();
   }
   for(const name of ['list','board','queue','audit'])$(name+'Mode').addEventListener('click',()=>setMode(name));
-  $('refresh').addEventListener('click',async()=>{if(dirty()||pending){message('cardStatus','Сначала завершите правки карточки.',true);return;}try{message('workspaceStatus','Обновляю…');await refreshList();message('workspaceStatus');}catch(error){message('workspaceStatus',error.message,true);}});
+  $('refresh').addEventListener('click',async()=>{
+    if(busy)return;
+    if(dirty()||pending){message('cardStatus','Сначала завершите правки карточки.',true);return;}
+    const generation=epoch,id=current?.id;
+    setBusy(true);message('workspaceStatus','Обновляю…');
+    try{
+      await refreshList();if(generation!==epoch)return;
+      if(id){const card=await rpc('crmRead',id);if(generation!==epoch)return;renderCard(card);}
+      message('workspaceStatus');message('cardStatus');
+    }catch(error){if(generation===epoch)message('workspaceStatus',error.message,true);}
+    finally{if(generation===epoch)setBusy(false);}
+  });
   $('logout').addEventListener('click',async()=>{const token=session?.token;endSession();if(token)try{await api('crmEmailLogout',token);}catch{message('loginStatus','Карточки закрыты. Сервер не подтвердил выход. Сессия истечёт автоматически.');}});
   $('diagnostics').addEventListener('click',async()=>{try{const entries=await rpc('crmDiagnostics');const labels={submitted:'Передано отправителю',ineligible:'Адрес не допущен',throttled:'Лимит частоты',quota_exhausted:'Почтовая квота исчерпана',transport_failure:'Ошибка отправки',not_configured:'Отправка не настроена',internal_failure:'Ошибка сервера'};$('diagnosticEntries').replaceChildren(...entries.slice().reverse().map(entry=>{const item=document.createElement('p');item.textContent=[entry.at,labels[entry.result]||entry.result,entry.requestId].join(' · ');return item;}));}catch(error){message('workspaceStatus',error.message,true);}});
   async function requestCode() {

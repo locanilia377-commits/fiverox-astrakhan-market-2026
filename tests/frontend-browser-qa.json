@@ -1,0 +1,94 @@
+{
+  "evidence_level": "local_browser",
+  "baselineRefreshBug": {
+    "before": [
+      "КП отправлено",
+      "Высокий"
+    ],
+    "after": [
+      "Не обработан",
+      "Не задан"
+    ],
+    "reproduced": true
+  },
+  "checks": [
+    {
+      "name": "Refresh preserves stage and priority, reloads external changes and keeps filters",
+      "status": "passed"
+    },
+    {
+      "name": "Lost response before save: re-read and replay same operation",
+      "status": "passed",
+      "oneOperation": true,
+      "sameOperationId": true,
+      "note": "До записи: черновик"
+    },
+    {
+      "name": "Lost response after save: confirmed exactly once",
+      "status": "passed",
+      "operations": 2,
+      "saveAudits": 2,
+      "sameOperationId": true
+    },
+    {
+      "name": "Lost response after contact: one history event and same operation on replay",
+      "status": "passed",
+      "contacts": 1,
+      "history": 1,
+      "sameOperationId": true
+    },
+    {
+      "name": "Lost Kanban response targets moved card rather than previously open card",
+      "status": "passed",
+      "target": "QA-B",
+      "stage": "Контакт установлен",
+      "audit": 1,
+      "sameOperationId": true
+    },
+    {
+      "name": "Kanban conflict reloads authoritative stage instead of showing stale board",
+      "status": "passed",
+      "stage": "Переговоры"
+    },
+    {
+      "name": "Card fields are locked while another card is loading",
+      "status": "passed"
+    },
+    {
+      "name": "Late card response after logout does not reopen private workspace",
+      "status": "passed"
+    },
+    {
+      "name": "Mobile recovery at 390px stays within viewport and saves confirmed values",
+      "status": "passed",
+      "metrics": {
+        "buttons": [
+          {
+            "label": "Проверить результат",
+            "left": 14,
+            "right": 191.7890625
+          },
+          {
+            "label": "Подтвердить сохранение",
+            "left": 14,
+            "right": 219.3203125
+          }
+        ],
+        "clientWidth": 375,
+        "note": "Мобильное подтверждение 390",
+        "scrollWidth": 375,
+        "viewport": 390
+      }
+    },
+    {
+      "name": "Logout clears private metadata and late responses cannot repopulate it",
+      "status": "passed"
+    }
+  ],
+  "checkedOn": "2026-11-13 Europe/Moscow",
+  "frontendRelease": "astrakhan-cabinet-2026-11-13-r3",
+  "limitations": [
+    "Synthetic local backend; this is not a production network-interruption test.",
+    "No-open-card drag recovery was not completed because native drag coordinates did not trigger the request."
+  ]
+}
