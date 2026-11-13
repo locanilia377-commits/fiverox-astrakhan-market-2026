@@ -1,0 +1,32 @@
+{
+  "frontendRelease": "astrakhan-cabinet-2026-11-13-r3",
+  "functionalFrontendCommit": "6e2aed5abc14b711f59364f226c5096fe6ba61ef",
+  "backendRelease": "astrakhan-cabinet-2026-11-12-r2",
+  "backendVersion": 2,
+  "checkedOn": "2026-11-13 Europe/Moscow",
+  "evidence_level": "production",
+  "role": "invited_editor",
+  "checks": {
+    "emailCodeLogin": "passed",
+    "serverConfirmedEditorRole": "passed",
+    "cardLoad": "passed",
+    "saveFiveFieldsAndStage": "passed",
+    "independentNativeSheetReadback": "passed",
+    "auditExactActorTimeAndBeforeAfter": "passed",
+    "refreshPreservesStagePriorityAndSearch": "passed",
+    "contactHistoryWithVerifiedActor": "passed",
+    "formulaPreservation": "passed",
+    "testDataCleanup": "passed",
+    "anonymousPublishedFiles": "passed"
+  },
+  "finalUniqueLeads": 203,
+  "networkInterruptionProduction": {
+    "status": "not_tested",
+    "local_browser": "passed"
+  },
+  "liveEditorAccessRevocation": {
+    "status": "not_tested",
+    "local_backend": "passed"
+  },
+  "privacy": "No real email, session, code, browser proof, private spreadsheet ID or working CRM data is included in this public report."
+}
