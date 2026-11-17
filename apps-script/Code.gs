@@ -1,6 +1,6 @@
 const CRM = Object.freeze({
   sheetId: 'YOUR_PRIVATE_CRM_SPREADSHEET_ID',
-  release: 'astrakhan-cabinet-2026-11-12-r2',
+  release: 'astrakhan-cabinet-2026-11-17-r4',
   stages: ['Не обработан', 'Контакт установлен', 'Потребность выявлена', 'КП отправлено', 'Переговоры', 'Клиент', 'Отложено', 'Отказ'],
   priorities: ['Не задан', 'Высокий', 'Средний', 'Низкий'],
   actions: ['Звонок', 'WhatsApp', 'Telegram', 'Email', 'Встреча', 'Другое'],
@@ -114,11 +114,18 @@ function crmFields_(row) {
 function crmVersion_(id, row) { return crmHash_([id, crmFields_(row)]); }
 function crmSession(token) {
   const access = crmContext_(token);
+  return crmSessionWith_(access);
+}
+function crmSessionWith_(access) {
   return { email: access.email, role: access.role, method: 'email', release: CRM.release,
     sheetUrl: access.role === 'admin' ? 'https://docs.google.com/spreadsheets/d/' + CRM.sheetId + '/edit' : '' };
 }
-function crmList(token) {
+function crmList(token) { return crmListWith_(crmContext_(token)); }
+function crmWorkspace(token) {
   const access = crmContext_(token);
+  return { session: crmSessionWith_(access), data: crmListWith_(access) };
+}
+function crmListWith_(access) {
   const rows = access.book.getSheetByName('CRM').getRange(5, 1, 500, 23).getValues();
   return {
     release: CRM.release, today: crmDate_(new Date()), stages: CRM.stages,
@@ -131,33 +138,68 @@ function crmList(token) {
     }))
   };
 }
-function crmReadWith_(access, id) {
+function crmOverviewWith_(access, id) {
   const card = crmFind_(access.book, id);
   const row = card.sheet.getRange(card.row, 1, 1, 23).getValues()[0];
-  const base = access.book.getSheetByName('База').getRange(5, 1, 995, 35).getValues().filter(item => String(item[0]) === id);
-  if (base.length !== 1) throw new Error('Проверьте ID в исходной базе.');
-  const details = base[0];
-  const history = access.book.getSheetByName('Касания').getRange(5, 1, 500, 8).getValues()
-    .filter(item => String(item[1]) === id && item[0] instanceof Date)
-    .sort((a, b) => b[0].getTime() - a[0].getTime()).slice(0, 30)
-    .map(item => ({ at: Utilities.formatDate(item[0], 'Europe/Moscow', 'dd.MM.yyyy HH:mm') + ' МСК', actor: String(item[3]), channel: String(item[4]), result: String(item[5]), note: String(item[6]), check: String(item[7]) }));
-  const auditSheet = access.book.getSheetByName(CRM.auditTab);
-  const audit = auditSheet && auditSheet.getLastRow() > 1 ? auditSheet.getRange(2, 1, auditSheet.getLastRow() - 1, 7).getDisplayValues()
-    .filter(item => item[3] === id).slice(-30).reverse().map(item => {
-      let changes = [];
-      try { changes = JSON.parse(item[5]); } catch (error) { /* A direct Sheets editor may have changed a journal cell. */ }
-      return { at: item[0] + ' МСК', actor: item[1], action: item[2], changes: changes };
-    }) : [];
+  if (String(row[0]) !== id) throw new Error('Строка точки переместилась. Повторите чтение.');
+  const base = access.book.getSheetByName('База');
+  const found = base.getRange(5, 1, 995, 1).createTextFinder(id).matchEntireCell(true).findAll();
+  if (found.length !== 1) throw new Error('Проверьте ID в исходной базе.');
+  const details = base.getRange(found[0].getRow(), 1, 1, 16).getValues()[0];
+  if (String(details[0]) !== id) throw new Error('Строка базы переместилась. Повторите чтение.');
   return {
     id: id, name: String(row[1]), city: String(row[18]), address: String(details[4]),
     profile: String(row[19]), qualification: String(row[17]), phones: String(details[8]),
     email: String(details[9]), websites: String(details[10]), socials: String(details[11]),
     links: [String(details[14]), String(details[15])], fields: crmFields_(row),
     lastContact: crmDate_(row[8]), contacts: row[9] || 0, check: String(row[7]),
-    version: crmVersion_(id, row), history: history, audit: audit
+    version: crmVersion_(id, row)
   };
 }
-function crmRead(token, id) { return crmReadWith_(crmContext_(token), id); }
+function crmOverview(token, id) { return crmOverviewWith_(crmContext_(token), id); }
+function crmFindHistory_(sheet, id, firstRow, idColumn, width, display) {
+  const count = sheet.getLastRow() - firstRow + 1;
+  if (count < 1) return [];
+  const matches = sheet.getRange(firstRow, idColumn, count, 1)
+    .createTextFinder(id).matchEntireCell(true).findAll();
+  return matches.map(cell => cell.getRow()).sort((a, b) => b - a).slice(0, 30).map(row => {
+    const range = sheet.getRange(row, 1, 1, width);
+    return (display ? range.getDisplayValues() : range.getValues())[0];
+  }).filter(row => String(row[idColumn - 1]) === id);
+}
+function crmHistoryWith_(access, id) {
+  const history = crmFindHistory_(access.book.getSheetByName('Касания'), id, 5, 2, 8, false)
+    .filter(item => String(item[1]) === id && item[0] instanceof Date)
+    .sort((a, b) => b[0].getTime() - a[0].getTime()).slice(0, 30)
+    .map(item => ({ at: Utilities.formatDate(item[0], 'Europe/Moscow', 'dd.MM.yyyy HH:mm') + ' МСК', actor: String(item[3]), channel: String(item[4]), result: String(item[5]), note: String(item[6]), check: String(item[7]) }));
+  return history;
+}
+function crmCardAuditWith_(access, id) {
+  const auditSheet = access.book.getSheetByName(CRM.auditTab);
+  const audit = auditSheet && auditSheet.getLastRow() > 1 ? crmFindHistory_(auditSheet, id, 2, 4, 7, true)
+    .filter(item => item[3] === id).map(item => {
+      let changes = [];
+      try { changes = JSON.parse(item[5]); } catch (error) { /* A direct Sheets editor may have changed a journal cell. */ }
+      return { at: item[0] + ' МСК', actor: item[1], action: item[2], changes: changes };
+    }) : [];
+  return audit;
+}
+function crmHistory(token, id) {
+  const access = crmContext_(token);
+  crmFind_(access.book, id);
+  return crmHistoryWith_(access, id);
+}
+function crmCardAudit(token, id) {
+  const access = crmContext_(token);
+  crmFind_(access.book, id);
+  return crmCardAuditWith_(access, id);
+}
+function crmRead(token, id) {
+  const access = crmContext_(token);
+  return Object.assign(crmOverviewWith_(access, id), {
+    history: crmHistoryWith_(access, id), audit: crmCardAuditWith_(access, id)
+  });
+}
 function crmAuditList(token) {
   const access = crmContext_(token);
   const sheet = access.book.getSheetByName(CRM.auditTab);
@@ -202,27 +244,39 @@ function crmCommit_(access, card, changes, requests, operationId, action, finger
   const auditValues = [at, access.email, action, card.id, card.name, JSON.stringify(changes), operationId];
   const operationValues = [operationId, access.email, card.id, action, fingerprint, at, JSON.stringify(result)];
   const append = (sheetId, values) => ({ appendCells: { sheetId: sheetId, rows: [{ values: values.map(crmStringCell_) }], fields: 'userEnteredValue' } });
-  Sheets.Spreadsheets.batchUpdate({ requests: requests.concat([append(audit.getSheetId(), auditValues), append(operations.getSheetId(), operationValues)]) }, book.getId());
+  try {
+    Sheets.Spreadsheets.batchUpdate({ requests: requests.concat([append(audit.getSheetId(), auditValues), append(operations.getSheetId(), operationValues)]) }, book.getId());
+  } catch (error) {
+    throw new Error('CRM_WRITE_UNCERTAIN: Проверьте результат или повторите ту же операцию.');
+  }
   return result;
 }
 function crmSave(token, id, version, patch, operationId) {
+  return crmSaveWith_(token, id, version, patch, operationId, false);
+}
+function crmSaveWith_(token, id, version, patch, operationId, canonical) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length > 13) throw new Error('Форма заполнена неверно.');
   const keys = Object.keys(patch).sort();
   keys.forEach(key => { if (!Object.prototype.hasOwnProperty.call(CRM.fields, key)) throw new Error('Поле не разрешено для записи.'); crmValidate_(key, patch[key]); });
   const fingerprint = crmHash_([id, version, keys.map(key => [key, patch[key]])]);
-  return crmWithLock_(() => {
-    const access = crmContext_(token, 'editor');
+  let access, rowHint;
+  const result = crmWithLock_(() => {
+    access = crmContext_(token, 'editor');
     const replay = crmOperation_(access.book, access.email, operationId, 'Правка карточки', id, fingerprint);
     if (replay) return replay;
     const found = crmFind_(access.book, id), row = found.sheet.getRange(found.row, 1, 1, 23).getValues()[0];
+    if (String(row[0]) !== id) throw new Error('Строка точки переместилась. Повторите чтение.');
+    rowHint = found.row;
+    if (canonical && version !== crmVersion_(id, row)) return { conflict: true, operationId: operationId };
     if (version !== crmVersion_(id, row)) throw new Error('CRM_CONFLICT: Карточку уже изменили. Ваши правки оставлены в форме. Загрузите актуальную версию перед новым сохранением.');
     const fields = crmFields_(row), changes = [], requests = [];
+    const formulas = canonical ? found.sheet.getRange(found.row, 1, 1, 23).getFormulas()[0] : null;
     keys.forEach(key => {
       const parsed = crmValidate_(key, patch[key]);
       const after = parsed instanceof Date ? crmDate_(parsed) : parsed === '' ? '' : String(parsed);
       if (after === fields[key]) return;
       const spec = CRM.fields[key];
-      if (found.sheet.getRange(found.row, spec.col).getFormula()) throw new Error('Поле содержит формулу. Обратитесь к владельцу таблицы.');
+      if (formulas ? formulas[spec.col - 1] : found.sheet.getRange(found.row, spec.col).getFormula()) throw new Error('Поле содержит формулу. Обратитесь к владельцу таблицы.');
       changes.push({ field: spec.label, before: fields[key], after: after });
       requests.push({ updateCells: { start: { sheetId: found.sheet.getSheetId(), rowIndex: found.row - 1, columnIndex: spec.col - 1 }, rows: [{ values: [crmCell_(parsed)] }], fields: 'userEnteredValue' } });
       row[spec.col - 1] = parsed;
@@ -231,6 +285,37 @@ function crmSave(token, id, version, patch, operationId) {
     if (!changes.length) return result;
     return crmCommit_(access, { id: id, name: String(row[1]) }, changes, requests, operationId, 'Правка карточки', fingerprint, result);
   });
+  if (!canonical) return result;
+  try {
+    return Object.assign({}, result, { card: crmCanonicalRow_(access.book, id, rowHint) });
+  } catch (error) {
+    throw new Error('CRM_WRITE_UNCERTAIN: Не удалось перечитать результат. Повторите ту же операцию.');
+  }
+}
+function crmCanonicalRow_(book, id, rowHint) {
+  function read(number) {
+    const reply = Sheets.Spreadsheets.Values.get(book.getId(), "'CRM'!A" + number + ":W" + number, {
+      valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'SERIAL_NUMBER'
+    });
+    const values = (reply.values || [])[0] || [];
+    return Array.from({ length: 23 }, (_, index) => values[index] ?? '');
+  }
+  let row = read(rowHint || crmFind_(book, id).row);
+  if (String(row[0]) !== id && rowHint) row = read(crmFind_(book, id).row);
+  if (String(row[0]) !== id) throw new Error('ID точки не совпал.');
+  [6, 8, 11, 12].forEach(index => {
+    if (typeof row[index] === 'number') {
+      row[index] = new Date(Date.UTC(1899, 11, 30) + Math.floor(row[index]) * 86400000).toISOString().slice(0, 10);
+    }
+  });
+  return { id: id, fields: crmFields_(row), version: crmVersion_(id, row),
+    lastContact: crmDate_(row[8]), contacts: row[9] || 0, check: String(row[7]) };
+}
+function crmSaveFast(token, id, version, patch, operationId) {
+  return crmSaveWith_(token, id, version, patch, operationId, true);
+}
+function crmMoveFast(token, id, version, stage, operationId) {
+  return crmSaveFast(token, id, version, { stage: stage }, operationId);
 }
 function crmMove(token, id, version, stage, operationId) {
   return crmSave(token, id, version, { stage: stage }, operationId);
@@ -268,7 +353,8 @@ function doPost(e) {
   try { request = JSON.parse(post.contents); } catch (error) { return crmJson_({ ok: false, error: 'Неверный запрос.' }); }
   const methods = {
     crmEmailStart: [crmEmailStart, 2], crmEmailVerify: [crmEmailVerify, 3], crmEmailLogout: [crmEmailLogout, 1],
-    crmSession: [crmSession, 1], crmList: [crmList, 1], crmRead: [crmRead, 2], crmSave: [crmSave, 5], crmAuditList: [crmAuditList, 1],
+    crmWorkspace: [crmWorkspace, 1], crmOverview: [crmOverview, 2], crmHistory: [crmHistory, 2], crmCardAudit: [crmCardAudit, 2],
+    crmSaveFast: [crmSaveFast, 5], crmMoveFast: [crmMoveFast, 5], crmSession: [crmSession, 1], crmList: [crmList, 1], crmRead: [crmRead, 2], crmSave: [crmSave, 5], crmAuditList: [crmAuditList, 1],
     crmMove: [crmMove, 5], crmRecord: [crmRecord, 4], crmDiagnostics: [crmDiagnostics, 1]
   };
   if (!request || typeof request.method !== 'string' || !Object.prototype.hasOwnProperty.call(methods, request.method) || !Array.isArray(request.args) || request.args.length !== methods[request.method][1]) return crmJson_({ ok: false, error: 'Неверный запрос.' });
