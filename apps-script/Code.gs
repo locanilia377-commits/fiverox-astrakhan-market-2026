@@ -1,6 +1,6 @@
 const CRM = Object.freeze({
   sheetId: 'YOUR_PRIVATE_CRM_SPREADSHEET_ID',
-  release: 'astrakhan-cabinet-2026-11-18-r5',
+  release: 'astrakhan-cabinet-2026-11-18-r6',
   stages: ['Не обработан', 'Контакт установлен', 'Потребность выявлена', 'КП отправлено', 'Переговоры', 'Клиент', 'Отложено', 'Отказ'],
   priorities: ['Не задан', 'Высокий', 'Средний', 'Низкий'],
   actions: ['Звонок', 'WhatsApp', 'Telegram', 'Email', 'Встреча', 'Другое'],
@@ -247,40 +247,56 @@ function crmOperation_(book, actor, operationId, action, id, fingerprint) {
   if (typeof operationId !== 'string' || !/^[a-f0-9-]{36}$/.test(operationId)) throw new Error('Нет корректного номера операции.');
   const sheet = book.getSheetByName(CRM.operationsTab);
   if (!sheet || !book.getSheetByName(CRM.auditTab)) throw new Error('Журнал CRM ещё не настроен.');
-  if (sheet.getLastRow() < 2) return null;
-  const found = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).createTextFinder(operationId).matchEntireCell(true).findAll();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+  const found = sheet.getRange(2, 1, lastRow - 1, 1).createTextFinder(operationId).matchEntireCell(true).findAll();
   if (found.length > 1) throw new Error('Повтор ID в журнале операций.');
   if (!found.length) return null;
   const row = sheet.getRange(found[0].getRow(), 1, 1, 7).getDisplayValues()[0];
   if (row[1] !== actor || row[2] !== id || row[3] !== action || row[4] !== fingerprint) throw new Error('Этот номер операции уже использован для другого запроса.');
   return JSON.parse(row[6]);
 }
-function crmCommit_(access, card, changes, requests, operationId, action, fingerprint, result) {
+function crmCommit_(access, card, changes, requests, operationId, action, fingerprint, result, returnRow) {
   const book = access.book, at = crmTime_();
   const audit = book.getSheetByName(CRM.auditTab), operations = book.getSheetByName(CRM.operationsTab);
   if (!audit || !operations) throw new Error('Не найден обязательный журнал. Сохранение отменено.');
   const auditValues = [at, access.email, action, card.id, card.name, JSON.stringify(changes), operationId];
   const operationValues = [operationId, access.email, card.id, action, fingerprint, at, JSON.stringify(result)];
   const append = (sheetId, values) => ({ appendCells: { sheetId: sheetId, rows: [{ values: values.map(crmStringCell_) }], fields: 'userEnteredValue' } });
+  const update = { requests: requests.concat([append(audit.getSheetId(), auditValues), append(operations.getSheetId(), operationValues)]) };
+  if (returnRow) {
+    update.includeSpreadsheetInResponse = true;
+    update.responseIncludeGridData = true;
+    update.responseRanges = ["'CRM'!A" + returnRow.number + ':W' + returnRow.number];
+  }
+  let reply;
   try {
-    Sheets.Spreadsheets.batchUpdate({ requests: requests.concat([append(audit.getSheetId(), auditValues), append(operations.getSheetId(), operationValues)]) }, book.getId());
+    reply = Sheets.Spreadsheets.batchUpdate(update, book.getId());
   } catch (error) {
+    if (returnRow) console.warn('CRM move batch error: ' + String(error.message || error).slice(0, 240));
     throw new Error('CRM_WRITE_UNCERTAIN: Проверьте результат или повторите ту же операцию.');
   }
-  return result;
+  const recorded = returnRow ? crmCommittedRow_(reply, returnRow, card.id) : null;
+  return recorded ? Object.assign({}, result, { card: recorded }) : result;
 }
 function crmSave(token, id, version, patch, operationId) {
   return crmSaveWith_(token, id, version, patch, operationId, false);
 }
-function crmSaveWith_(token, id, version, patch, operationId, canonical) {
+function crmSaveWith_(token, id, version, patch, operationId, canonical, returnWriteRow = false) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length > 13) throw new Error('Форма заполнена неверно.');
   const keys = Object.keys(patch).sort();
   keys.forEach(key => { if (!Object.prototype.hasOwnProperty.call(CRM.fields, key)) throw new Error('Поле не разрешено для записи.'); crmValidate_(key, patch[key]); });
   const fingerprint = crmHash_([id, version, keys.map(key => [key, patch[key]])]);
   let access, rowHint;
+  const startedAt = returnWriteRow ? Date.now() : 0;
+  const timings = {};
+  const mark = label => { if (returnWriteRow) timings[label] = Date.now() - startedAt; };
   const result = crmWithLock_(() => {
+    mark('lockedMs');
     access = crmContext_(token, 'editor');
+    mark('authorizedMs');
     const replay = crmOperation_(access.book, access.email, operationId, 'Правка карточки', id, fingerprint);
+    mark('receiptCheckedMs');
     if (replay) return replay;
     const found = crmFind_(access.book, id), row = found.sheet.getRange(found.row, 1, 1, 23).getValues()[0];
     if (String(row[0]) !== id) throw new Error('Строка точки переместилась. Повторите чтение.');
@@ -288,7 +304,8 @@ function crmSaveWith_(token, id, version, patch, operationId, canonical) {
     if (canonical && version !== crmVersion_(id, row)) return { conflict: true, operationId: operationId };
     if (version !== crmVersion_(id, row)) throw new Error('CRM_CONFLICT: Карточку уже изменили. Ваши правки оставлены в форме. Загрузите актуальную версию перед новым сохранением.');
     const fields = crmFields_(row), changes = [], requests = [];
-    const formulas = canonical ? found.sheet.getRange(found.row, 1, 1, 23).getFormulas()[0] : null;
+    const formulas = canonical && !returnWriteRow ? found.sheet.getRange(found.row, 1, 1, 23).getFormulas()[0] : null;
+    const sheetId = found.sheet.getSheetId();
     keys.forEach(key => {
       const parsed = crmValidate_(key, patch[key]);
       const after = parsed instanceof Date ? crmDate_(parsed) : parsed === '' ? '' : String(parsed);
@@ -296,19 +313,41 @@ function crmSaveWith_(token, id, version, patch, operationId, canonical) {
       const spec = CRM.fields[key];
       if (formulas ? formulas[spec.col - 1] : found.sheet.getRange(found.row, spec.col).getFormula()) throw new Error('Поле содержит формулу. Обратитесь к владельцу таблицы.');
       changes.push({ field: spec.label, before: fields[key], after: after });
-      requests.push({ updateCells: { start: { sheetId: found.sheet.getSheetId(), rowIndex: found.row - 1, columnIndex: spec.col - 1 }, rows: [{ values: [crmCell_(parsed)] }], fields: 'userEnteredValue' } });
+      requests.push({ updateCells: { start: { sheetId, rowIndex: found.row - 1, columnIndex: spec.col - 1 }, rows: [{ values: [crmCell_(parsed)] }], fields: 'userEnteredValue' } });
       row[spec.col - 1] = parsed;
     });
     const result = { saved: true, operationId: operationId, version: crmVersion_(id, row) };
     if (!changes.length) return result;
-    return crmCommit_(access, { id: id, name: String(row[1]) }, changes, requests, operationId, 'Правка карточки', fingerprint, result);
+    mark('preparedMs');
+    return crmCommit_(access, { id: id, name: String(row[1]) }, changes, requests, operationId, 'Правка карточки', fingerprint, result,
+      returnWriteRow ? { sheetId, number: found.row } : null);
   });
+  mark('lockedWorkMs');
   if (!canonical) return result;
   try {
-    return Object.assign({}, result, { card: crmCanonicalRow_(access.book, id, rowHint) });
+    const snapshotSource = result.card ? 'batchUpdate' : 'currentRow';
+    const confirmed = result.card ? result : Object.assign({}, result, { card: crmCanonicalRow_(access.book, id, rowHint) });
+    mark('confirmedMs');
+    if (returnWriteRow) console.info('CRM move timing ' + JSON.stringify(Object.assign({ snapshotSource }, timings)));
+    return confirmed;
   } catch (error) {
     throw new Error('CRM_WRITE_UNCERTAIN: Не удалось перечитать результат. Повторите ту же операцию.');
   }
+}
+function crmCommittedRow_(reply, target, id) {
+  const sheets = reply?.updatedSpreadsheet?.sheets;
+  if (!Array.isArray(sheets)) return null;
+  const sheet = sheets.find(item => item.properties?.sheetId === target.sheetId);
+  if (!Array.isArray(sheet?.data)) return null;
+  const range = sheet.data.find(item => (item.startColumn ?? 0) === 0 && item.startRow === target.number - 1);
+  const cells = range?.rowData?.[0]?.values;
+  if (!Array.isArray(cells)) return null;
+  const row = Array.from({ length: 23 }, (_, index) => {
+    const cell = cells[index], value = cell?.effectiveValue;
+    return value?.stringValue ?? value?.numberValue ?? value?.boolValue ?? (value?.errorValue ? cell.formattedValue ?? '' : '');
+  });
+  if (String(row[0]) !== id || !CRM.stages.includes(row[2])) return null;
+  return crmCanonicalFromValues_(id, row);
 }
 function crmCanonicalRow_(book, id, rowHint) {
   function read(number) {
@@ -320,6 +359,9 @@ function crmCanonicalRow_(book, id, rowHint) {
   }
   let row = read(rowHint || crmFind_(book, id).row);
   if (String(row[0]) !== id && rowHint) row = read(crmFind_(book, id).row);
+  return crmCanonicalFromValues_(id, row);
+}
+function crmCanonicalFromValues_(id, row) {
   if (String(row[0]) !== id) throw new Error('ID точки не совпал.');
   [6, 8, 11, 12].forEach(index => {
     if (typeof row[index] === 'number') {
@@ -333,7 +375,7 @@ function crmSaveFast(token, id, version, patch, operationId) {
   return crmSaveWith_(token, id, version, patch, operationId, true);
 }
 function crmMoveFast(token, id, version, stage, operationId) {
-  return crmSaveFast(token, id, version, { stage: stage }, operationId);
+  return crmSaveWith_(token, id, version, { stage: stage }, operationId, true, true);
 }
 function crmMove(token, id, version, stage, operationId) {
   return crmSave(token, id, version, { stage: stage }, operationId);
