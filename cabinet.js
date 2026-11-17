@@ -58,35 +58,54 @@
     message('loginStatus', 'Вход по коду подключается. Отправка кодов пока недоступна.');
   }
 
-  async function api(method, ...args) {
+  function transportError(kind, retryable, message) {
+    return Object.assign(new Error(message), { network: true, retryable, kind });
+  }
+  async function postRpc(method, args, timeoutMs) {
     if (!config?.backendUrl) throw new Error('Кабинет ещё не подключён к серверу.');
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     let reply;
     try {
       const response = await fetch(config.backendUrl, { method:'POST', mode:'cors', credentials:'omit', referrerPolicy:'no-referrer', signal:controller.signal, headers:{'Content-Type':'text/plain;charset=UTF-8'}, body:JSON.stringify({method,args}) });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
+      if (!response.ok) {
+        const retryable = [408, 500, 502, 503, 504].includes(response.status);
+        throw transportError('http', retryable, 'Сервер CRM вернул HTTP ' + response.status + '.');
+      }
       reply = await response.json();
     } catch (cause) {
-      const error = new Error('Связь с CRM прервалась. Результат записи пока неизвестен.');
-      error.network = true;
-      throw error;
+      if (cause?.network) throw cause;
+      const kind = controller.signal.aborted ? 'timeout' : cause instanceof SyntaxError ? 'format' : 'connection';
+      throw transportError(kind, kind !== 'format', 'Связь с CRM прервалась.');
     } finally { clearTimeout(timeout); }
     if (reply?.ok === true && Object.hasOwn(reply,'result')) return reply.result;
     const error = new Error(typeof reply?.error === 'string' ? reply.error : 'CRM вернула неполный ответ.');
     error.network = typeof reply?.error !== 'string' || error.message.startsWith('CRM_WRITE_UNCERTAIN:');
     throw error;
   }
-  async function rpc(method, ...args) {
+  const api = (method, ...args) => postRpc(method, args, 45000);
+  async function authenticatedRequest(send) {
     const identity = session, generation = epoch;
     if (!identity) throw new Error('Войдите в кабинет.');
     try {
-      const result = await api(method, identity.token, ...args);
+      const result = await send(identity.token);
       if (generation !== epoch) throw new Error('Сессия изменилась.');
       return result;
     } catch (error) {
       if (generation === epoch && /CRM_AUTH_REQUIRED/.test(error.message)) endSession('Сессия завершилась. Войдите снова.');
       throw error;
+    }
+  }
+  const rpc = (method, ...args) => authenticatedRequest(token => api(method, token, ...args));
+  async function requestRefresh(id) {
+    const generation = epoch;
+    const request = timeoutMs => authenticatedRequest(token => postRpc('crmRefresh', [token, id], timeoutMs));
+    try {
+      return await request(9000);
+    } catch (error) {
+      if (generation !== epoch || !error.retryable) throw error;
+      message('workspaceStatus','Связь прервалась. Повторяю обновление…');
+      return request(11000);
     }
   }
   function endSession(text = '') {
@@ -290,11 +309,6 @@
     try{const card=await fetchCard(id);if(request!==cardRequest||generation!==epoch)return;pending=null;$('retry').hidden=true;activity.reset();renderCard(card);message('cardStatus');message('workspaceStatus');}
     catch(error){if(generation===epoch)message('workspaceStatus',error.message,true);}
     finally{if(generation===epoch&&request===cardRequest)setBusy(false);}
-  }
-  async function refreshList() {
-    const generation=epoch;
-    const result=await rpc('crmList');if(generation!==epoch)return;
-    setWorkspaceData(result);
   }
   function setWorkspaceData(result) {
     db=result;
@@ -520,13 +534,32 @@
   $('refresh').addEventListener('click',async()=>{
     if(busy)return;
     if(dirty()||pending||activity.elements.note.value){message('cardStatus','Сначала завершите правки карточки.',true);return;}
-    const generation=epoch,id=current?.id;
+    const generation=epoch,id=current?.id ?? null;
     setBusy(true);message('workspaceStatus','Обновляю…');
     try{
-      await refreshList();if(generation!==epoch)return;
-      if(id){const card=await fetchCard(id);if(generation!==epoch)return;renderCard(card);}
-      message('workspaceStatus');message('cardStatus');
-    }catch(error){if(generation===epoch)message('workspaceStatus',error.message,true);}
+      const snapshot = await requestRefresh(id);
+      if(generation!==epoch)return;
+      const { data, card } = snapshot ?? {};
+      if (!data || !['leads','stages','priorities','actions','outcomes'].every(key => Array.isArray(data[key])) ||
+          (card !== null && (id === null || card?.id !== id || !Array.isArray(card?.links) ||
+            !keys.every(key => typeof card?.fields?.[key] === 'string')))) {
+        throw new Error('CRM вернула неполные данные.');
+      }
+      cardRequest += 1;
+      if (id && card === null) {
+        current = null;
+        $('record').hidden = true;
+        for (const key of ['contacts','history','cardAudit']) $(key).replaceChildren();
+        edit.reset();
+        activity.reset();
+      }
+      setWorkspaceData(data);
+      if (card) renderCard(card);
+      message('workspaceStatus',id && card === null ? 'Список обновлён. Открытой карточки больше нет в CRM.' : '');
+      message('cardStatus');
+    }catch(error){
+      if(generation===epoch)message('workspaceStatus','Не удалось обновить список. Показаны прежние данные. Нажмите «Обновить» ещё раз.',true);
+    }
     finally{if(generation===epoch)setBusy(false);}
   });
   $('logout').addEventListener('click',async()=>{const token=session?.token;endSession();if(token)try{await api('crmEmailLogout',token);}catch{message('loginStatus','Карточки закрыты. Сервер не подтвердил выход. Сессия истечёт автоматически.');}});
