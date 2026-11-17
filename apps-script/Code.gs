@@ -1,6 +1,6 @@
 const CRM = Object.freeze({
   sheetId: 'YOUR_PRIVATE_CRM_SPREADSHEET_ID',
-  release: 'astrakhan-cabinet-2026-11-17-r4',
+  release: 'astrakhan-cabinet-2026-11-18-r5',
   stages: ['Не обработан', 'Контакт установлен', 'Потребность выявлена', 'КП отправлено', 'Переговоры', 'Клиент', 'Отложено', 'Отказ'],
   priorities: ['Не задан', 'Высокий', 'Средний', 'Низкий'],
   actions: ['Звонок', 'WhatsApp', 'Telegram', 'Email', 'Встреча', 'Другое'],
@@ -125,8 +125,10 @@ function crmWorkspace(token) {
   const access = crmContext_(token);
   return { session: crmSessionWith_(access), data: crmListWith_(access) };
 }
-function crmListWith_(access) {
-  const rows = access.book.getSheetByName('CRM').getRange(5, 1, 500, 23).getValues();
+function crmListRows_(access) {
+  return access.book.getSheetByName('CRM').getRange(CRM.firstRow, 1, CRM.lastRow - CRM.firstRow + 1, 23).getValues();
+}
+function crmListWith_(access, rows = crmListRows_(access)) {
   return {
     release: CRM.release, today: crmDate_(new Date()), stages: CRM.stages,
     priorities: CRM.priorities, actions: CRM.actions, outcomes: CRM.outcomes,
@@ -142,6 +144,9 @@ function crmOverviewWith_(access, id) {
   const card = crmFind_(access.book, id);
   const row = card.sheet.getRange(card.row, 1, 1, 23).getValues()[0];
   if (String(row[0]) !== id) throw new Error('Строка точки переместилась. Повторите чтение.');
+  return crmOverviewFromRow_(access, id, row);
+}
+function crmOverviewFromRow_(access, id, row) {
   const base = access.book.getSheetByName('База');
   const found = base.getRange(5, 1, 995, 1).createTextFinder(id).matchEntireCell(true).findAll();
   if (found.length !== 1) throw new Error('Проверьте ID в исходной базе.');
@@ -157,6 +162,19 @@ function crmOverviewWith_(access, id) {
   };
 }
 function crmOverview(token, id) { return crmOverviewWith_(crmContext_(token), id); }
+function crmRefresh(token, id) {
+  const access = crmContext_(token);
+  if (id !== null && (typeof id !== 'string' || !/^(Y-)?\d{1,24}$/.test(id))) {
+    throw new Error('Некорректный ID точки.');
+  }
+  const rows = crmListRows_(access);
+  const matching = id === null ? [] : rows.filter(row => String(row[0]) === id);
+  if (matching.length > 1) throw new Error('ID открытой карточки дублируется в таблице.');
+  return {
+    data: crmListWith_(access, rows),
+    card: matching.length ? crmOverviewFromRow_(access, id, matching[0]) : null
+  };
+}
 function crmFindHistory_(sheet, id, firstRow, idColumn, width, display) {
   const count = sheet.getLastRow() - firstRow + 1;
   if (count < 1) return [];
@@ -353,7 +371,7 @@ function doPost(e) {
   try { request = JSON.parse(post.contents); } catch (error) { return crmJson_({ ok: false, error: 'Неверный запрос.' }); }
   const methods = {
     crmEmailStart: [crmEmailStart, 2], crmEmailVerify: [crmEmailVerify, 3], crmEmailLogout: [crmEmailLogout, 1],
-    crmWorkspace: [crmWorkspace, 1], crmOverview: [crmOverview, 2], crmHistory: [crmHistory, 2], crmCardAudit: [crmCardAudit, 2],
+    crmWorkspace: [crmWorkspace, 1], crmRefresh: [crmRefresh, 2], crmOverview: [crmOverview, 2], crmHistory: [crmHistory, 2], crmCardAudit: [crmCardAudit, 2],
     crmSaveFast: [crmSaveFast, 5], crmMoveFast: [crmMoveFast, 5], crmSession: [crmSession, 1], crmList: [crmList, 1], crmRead: [crmRead, 2], crmSave: [crmSave, 5], crmAuditList: [crmAuditList, 1],
     crmMove: [crmMove, 5], crmRecord: [crmRecord, 4], crmDiagnostics: [crmDiagnostics, 1]
   };
