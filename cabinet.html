@@ -4,17 +4,28 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
 <title>Личный кабинет · FIVEROX Астрахань</title>
-<link rel="stylesheet" href="cabinet.css"><script src="crm-config.js" defer></script><script src="cabinet.js" defer></script>
+<link rel="stylesheet" href="cabinet.css?v=r4"><script src="crm-config.js?v=r4" defer></script><script src="cabinet.js?v=r4" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">Перейти к содержимому</a>
-<header class="bar"><div class="container brand"><a href="./index.html" aria-label="FIVEROX, обзор рынка"><img src="fiverox-logo.png" alt="FIVEROX" width="148" height="22"></a><div><span>Личный кабинет</span><strong>Астрахань и Астраханская область</strong></div><a class="back" href="./index.html#market">Обзор рынка</a></div></header>
+<header class="bar">
+ <div class="container brand"><a href="./index.html" aria-label="FIVEROX, обзор рынка"><img src="fiverox-logo.png" alt="FIVEROX" width="148" height="22"></a><div><span>Личный кабинет</span><strong>Астрахань и Астраханская область</strong></div></div>
+ <nav class="container sections" aria-label="Разделы FIVEROX">
+  <a href="#crm" data-section="crm">Кабинет</a>
+  <a href="#market" data-section="market">Рынок и доходы</a>
+  <a href="#leads" data-section="leads">Лиды и конкуренция</a>
+  <a href="#model" data-section="model">Модель продаж</a>
+ </nav>
+</header>
+<section id="research" hidden aria-label="Исследование Астрахани">
+ <iframe id="researchFrame" title="Рынок, лиды и модель продаж Астрахани" referrerpolicy="no-referrer" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+</section>
 <main id="main" class="container">
  <section id="login" class="login panel">
   <div class="eyebrow">CRM FIVEROX</div><h1>Работа с партнёрами</h1><p>Карточки, этапы продаж и история общения в одном кабинете.</p>
   <form id="requestCode"><label>Электронная почта<input name="email" type="email" autocomplete="email" maxlength="254" required placeholder="Адрес с доступом к CRM"></label><button class="primary" type="submit">Получить код</button></form>
   <form id="verifyCode" hidden><p id="destination"></p><label>Код из письма<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{8}" maxlength="8" required></label><div class="actions"><button class="primary" type="submit">Войти в кабинет</button><button type="button" id="changeEmail">Другой адрес</button><button type="button" id="resend">Отправить ещё раз</button></div></form>
-  <p id="loginStatus" class="status" role="status"></p><p class="muted">Доступ получают владелец CRM-таблицы и добавленные им редакторы. После обновления страницы потребуется снова войти.</p>
+  <p id="loginStatus" class="status" role="status"></p><button id="resume" type="button" hidden>Повторить загрузку кабинета</button><p class="muted">Доступ получают владелец CRM-таблицы и добавленные им редакторы. Вход сохраняется в этой вкладке до 12 часов.</p>
  </section>
  <section id="workspace" hidden>
   <div class="heading"><div><div class="eyebrow">Кабинет менеджера</div><h1>Партнёры Астрахани</h1><p id="identity" class="muted"></p></div><div class="actions"><a id="crmSheet" class="button" hidden target="_blank" rel="noopener">Открыть CRM-таблицу</a><button id="refresh" type="button">Обновить</button><button id="logout" type="button">Выйти</button></div></div>
@@ -22,6 +33,7 @@
   <section class="panel controls"><div class="toolbar"><div class="views" role="group" aria-label="Вид CRM"><button id="listMode" type="button" aria-pressed="true">Список</button><button id="boardMode" type="button" aria-pressed="false">Воронка</button><button id="queueMode" type="button" aria-pressed="false">Очередь</button><button id="auditMode" type="button" aria-pressed="false">Журнал</button></div><span id="count" class="muted"></span></div>
    <div class="filters"><label>Поиск<input id="search" type="search" placeholder="Название, город или ID"></label><label>Этап<select id="stageFilter"><option value="">Все этапы</option></select></label><label>Ответственный<select id="managerFilter"><option value="">Все менеджеры</option></select></label><label>Следующее действие<select id="dueFilter"><option value="">Все даты</option><option value="late">Просрочено</option><option value="today">Сегодня</option><option value="planned">Запланировано</option><option value="none">Без срока</option></select></label><label>Профиль<select id="qualificationFilter"><option value="">Вся база</option><option value="Подтверждено">Подтверждённые</option><option value="Кандидат">Кандидаты</option></select></label></div>
   </section>
+  <p id="moveStatus" class="status" role="status"></p><div id="moveRetry" class="actions" hidden></div>
   <p id="workspaceStatus" class="status" role="status"></p>
   <div id="recovery" class="actions" hidden><button id="recover" type="button">Проверить результат</button><button id="retry" type="button" hidden>Подтвердить сохранение</button></div>
   <div id="layout" class="layout"><section id="results" class="panel results" aria-label="Точки CRM"></section><section id="record" class="panel editor-panel" hidden aria-label="Карточка CRM">
@@ -33,8 +45,8 @@
     <label>Причина отказа<input name="reason" maxlength="500"></label><label>Комментарий менеджера<textarea name="note" rows="3" maxlength="3000"></textarea></label>
     <div class="actions"><button class="primary" type="submit">Сохранить карточку</button><button id="discard" type="button">Отменить правки</button></div>
    </form><p id="cardStatus" class="status" role="status"></p>
-   <details id="historySection" open><summary>История общения</summary><form id="activityForm"><div class="grid"><label>Канал<select name="channel" required></select></label><label>Результат<select name="result" required></select></label></div><label>Суть разговора<textarea name="note" rows="2" maxlength="3000"></textarea></label><button type="submit">Записать касание</button></form><div id="history"></div></details>
-   <details><summary>Изменения этой карточки</summary><div id="cardAudit"></div></details>
+   <details id="historySection"><summary>История общения</summary><form id="activityForm"><div class="grid"><label>Канал<select name="channel" required></select></label><label>Результат<select name="result" required></select></label></div><label>Суть разговора<textarea name="note" rows="2" maxlength="3000"></textarea></label><button type="submit">Записать касание</button></form><div id="history"></div></details>
+   <details id="cardAuditSection"><summary>Изменения этой карточки</summary><div id="cardAudit"></div></details>
   </section></div>
   <section id="auditPanel" class="panel" hidden><h2>Журнал изменений</h2><p class="muted">Здесь отображаются изменения через кабинет. Прямые правки в Google Таблицах могут обходить этот журнал.</p><div id="auditEntries"></div></section>
   <details id="admin" class="panel admin" hidden><summary>Доступ и диагностика</summary><p>Выдайте менеджеру права редактора в закрытой CRM-таблице. Для отзыва удалите его доступ к файлу. Следующий запрос кабинета проверит актуальные права.</p><button type="button" id="diagnostics">Проверить отправку кодов</button><div id="diagnosticEntries"></div></details>

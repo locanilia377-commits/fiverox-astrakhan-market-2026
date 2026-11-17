@@ -57,6 +57,12 @@ button.chart-row:hover,button.chart-row:focus-visible{background:#edf5f2}
 @media(max-width:690px){.chart-grid,.market-charts{grid-template-columns:minmax(0,1fr);gap:10px}.chart{padding:14px}.chart-row{grid-template-columns:minmax(95px,1.15fr) minmax(18px,1fr) max-content}.scenario-chart text{font-size:20px}}
 </style>
 
+<script>
+if (window !== window.top && new URLSearchParams(location.search).get('embed') === 'cabinet') {
+ document.documentElement.classList.add('cabinet-embed');
+}
+</script>
+<style>.cabinet-embed .bar,.cabinet-embed .nav-wrap,.cabinet-embed .skip{display:none}.cabinet-embed main{padding-top:14px}</style>
 </head>
 <body>
 <a class="skip" href="#main">Перейти к содержимому</a>
