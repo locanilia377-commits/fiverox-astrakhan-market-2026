@@ -4,7 +4,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
 <title>Личный кабинет · FIVEROX Астрахань</title>
-<link rel="stylesheet" href="cabinet.css?v=r4"><script src="crm-config.js?v=r5" defer></script><script src="cabinet.js?v=r5" defer></script>
+<link rel="stylesheet" href="cabinet.css?v=r4"><script src="crm-config.js?v=r5" defer></script><script src="cabinet-regional.js?v=r7" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">Перейти к содержимому</a>
@@ -53,4 +53,59 @@
  </section>
 </main>
 <footer class="container muted">FIVEROX · Кабинет Астрахани · <span id="release"></span></footer>
+<template id="regionalWorkspaceTemplate">
+  <div class="regional-tools">
+    <details id="regionalGuide" class="panel"><summary>Инструкция менеджера</summary><div id="regionalGuideItems"></div><p id="regionalGuideStatus" role="status"></p></details>
+    <details id="regionalReport" class="panel"><summary>Отчёт руководителя</summary>
+      <form id="regionalReportForm" class="grid">
+        <label>Период<select name="period"><option value="day">День</option><option value="week">Неделя</option><option value="month">Месяц</option><option value="custom">Свой период</option></select></label>
+        <label>Территория<select name="area"><option value="all">Астрахань и область</option><option value="city">Астрахань</option><option value="rest">Область без Астрахани</option></select></label>
+        <label hidden>От<input name="from" type="date"></label><label hidden>До<input name="to" type="date"></label>
+        <label>Сотрудник<select name="staff"><option value="">Все сотрудники</option></select></label>
+        <div class="actions"><button class="primary" type="submit">Показать отчёт</button></div>
+      </form>
+      <p id="regionalReportStatus" role="status"></p><div id="regionalReportData"></div>
+    </details>
+    <details id="regionalAssign" class="panel" hidden><summary>Массовое назначение</summary>
+      <form id="regionalAssignForm" class="grid">
+        <label>Ответственный<select name="target" required></select></label>
+        <label>Территория<select name="area"><option value="all">Астрахань и область</option><option value="city">Астрахань</option><option value="rest">Область без Астрахани</option></select></label>
+        <div class="actions"><button type="submit">Показать состав назначения</button><button id="regionalAssignConfirm" type="button" hidden>Подтвердить назначение</button></div>
+      </form><p id="regionalAssignStatus" role="status"></p>
+    </details>
+  </div>
+</template>
+<template id="regionalCardTemplate">
+  <details id="regionalSurvey"><summary>Анкета клиента · звонок и визит</summary>
+    <form id="regionalSurveyForm"><div id="regionalSurveyFields"></div><button type="submit" disabled>Сохранить анкету</button></form><p id="regionalSurveyStatus" role="status"></p>
+  </details>
+  <details id="regionalAction"><summary>План, визиты и тесты</summary>
+    <form id="regionalActionForm" class="grid">
+      <label>Тип<select name="kind"><option value="task">Следующее действие</option><option value="visit">Визит</option><option value="test">Тест</option></select></label>
+      <label>Дата<input name="date" type="date" required></label>
+      <label>Статус<select name="status"><option value="planned">Запланировано</option><option value="completed">Выполнено</option></select></label>
+      <label>Заметка<textarea name="note" rows="2" maxlength="1500"></textarea></label>
+      <div class="actions"><button type="submit">Сохранить действие</button></div>
+    </form><p id="regionalActionStatus" role="status"></p>
+  </details>
+  <details id="regionalSale"><summary>Продажи материалов и услуг</summary>
+    <form id="regionalSaleForm" class="grid">
+      <label>Категория<select name="category"><option value="material">Материал</option><option value="service">Услуга</option></select></label>
+      <label>Дата<input name="date" type="date" required></label>
+      <label>Позиция<input name="item" maxlength="254" required></label>
+      <label>Количество<input name="quantity" type="number" min="1" step="1" required></label>
+      <label>Цена за единицу, ₽<input name="unitPrice" type="number" min="0" step="0.01" required></label>
+      <label>Статус<select name="status"><option value="planned">Запланирована</option><option value="confirmed">Подтверждена</option></select></label>
+      <label>Заметка<textarea name="note" rows="2" maxlength="1500"></textarea></label>
+      <div class="actions"><button type="submit">Сохранить продажу</button></div>
+    </form><p id="regionalSaleStatus" role="status"></p>
+  </details>
+</template>
+<style>
+  .regional-tools { display:grid; gap:.6rem; margin-top:1rem; margin-bottom:1rem }
+  .regional-tools h3,.regional-tools p { overflow-wrap:anywhere }
+  .regional-tools .grid,.editor-panel details .grid,#regionalSurveyFields .grid { grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr)) }
+  #regionalSurveyFields fieldset { min-width:0; border:1px solid #8886; border-radius:.65rem; padding:.75rem; margin:.6rem 0 }
+  #regionalSurveyFields input,#regionalSurveyFields textarea,#regionalSurveyFields select { width:100%;min-width:0 }
+</style>
 </body></html>
